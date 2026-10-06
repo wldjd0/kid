@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>孩子学习任务积分打卡</title>
+<style>
+*{box-sizing:border-box;font-family:system-ui, -apple-system, sans-serif}
+body{max-width:720px;margin:24px auto;padding:0 16px;background:#edf2fa}
+.card{background:#fff;padding:20px;border-radius:16px;margin-bottom:20px;box-shadow:0 4px 14px rgba(0,0,0,0.08)}
+h2{margin-top:0;color:#1f2937;font-size:20px;display:flex;align-items:center;gap:8px}
+.row{display:flex;gap:10px;margin:10px 0;flex-wrap:wrap;align-items:center}
+input,select,button{padding:10px 12px;border-radius:8px;border:1px solid #d1d5db;font-size:14px}
+select{background:#fff;min-width:90px}
+button{cursor:pointer;background:#4080ff;color:white;border:none;transition:0.2s ease}
+button:hover{filter:brightness(1.08)}
+button:active{transform:scale(0.97)}
+button.danger{background:#f56c6c}
+button.success{background:#67c23a}
+.item{padding:12px;border:1px solid #e5e7eb;border-radius:10px;margin:10px 0;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.item-icon{font-size:22px;margin-right:6px}
+.log-item{padding:8px 0;border-bottom:1px solid #eee;font-size:13px;color:#444}
+
+/* 积分闪烁动画 */
+#score{
+  transition: all 0.3s ease;
+}
+@keyframes scoreFlash {
+  0% {background-color: #fff; color:#1f2937;}
+  50% {background-color: #ffd700; color:#ff3300;}
+  100% {background-color: #fff; color:#1f2937;}
+}
+.flash-animate{
+  animation: scoreFlash 0.6s ease-in-out;
+  padding:2px 6px;
+  border-radius:4px;
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>当前积分：<span id="score">0</span></h2>
+</div>
+
+<div class="card">
+  <h2>📝 添加学习任务</h2>
+  <div class="row">
+    <select id="taskIcon">
+      <option value="">无图标</option>
+      <option value="📖">📖阅读</option>
+      <option value="✏️">✏️写作业</option>
+      <option value="🧮">🧮数学</option>
+      <option value="🎧">🎧听力</option>
+      <option value="🏃">🏃运动</option>
+      <option value="🎨">🎨画画</option>
+      <option value="📚">📚背诵</option>
+    </select>
+    <input id="taskName" placeholder="任务名称，例：阅读20分钟">
+    <input id="taskPoint" type="number" placeholder="积分">
+    <button onclick="addTask()">新增任务</button>
+  </div>
+  <div id="taskList"></div>
+</div>
+
+<div class="card">
+  <h2>🎁 奖励商店（可兑换）</h2>
+  <div class="row">
+    <select id="rewardIcon">
+      <option value="">无图标</option>
+      <option value="🍬">🍬零食</option>
+      <option value="📺">📺看动画</option>
+      <option value="🧸">🧸玩具</option>
+      <option value="🎮">🎮游戏时间</option>
+      <option value="🚲">🚲出去玩</option>
+      <option value="🍦">🍦冰淇淋</option>
+    </select>
+    <input id="rewardName" placeholder="奖励名称，例：看动画20分钟">
+    <input id="rewardPoint" type="number" placeholder="所需积分">
+    <button onclick="addReward()">新增奖励</button>
+  </div>
+  <div id="rewardList"></div>
+</div>
+
+<div class="card">
+  <h2>📜 兑换&任务记录</h2>
+  <div id="logList"></div>
+</div>
+
+<div class="card">
+  <button class="danger" onclick="clearAll()">重置全部数据</button>
+</div>
+
+<script>
+// 密码常量
+const PASSWORD = "817665";
+
+// 读取本地存储，兜底修复旧数据缺失字段
+let raw = localStorage.getItem('kidTaskData');
+let data;
+if(raw){
+  data = JSON.parse(raw);
+}else{
+  data = {};
+}
+data.score = data.score || 0;
+data.tasks = data.tasks || [];
+data.rewards = data.rewards || [];
+data.logs = data.logs || [];
+
+function save(){
+  localStorage.setItem('kidTaskData',JSON.stringify(data))
+}
+
+// 积分闪烁动画函数
+function triggerScoreFlash(){
+  const scoreDom = document.getElementById('score');
+  scoreDom.classList.remove('flash-animate');
+  void scoreDom.offsetWidth; // 触发动画重置
+  scoreDom.classList.add('flash-animate');
+}
+
+function render(){
+  document.getElementById('score').innerText = data.score;
+  let tHtml='';
+  data.tasks.forEach((item,i)=>{
+    const icon = item.icon || '';
+    tHtml+=`<div class="item"><span class="item-icon">${icon}</span>${item.name} +${item.point}分
+    <div>
+      <button onclick="getPoint(${i})">✅完成</button>
+      <button class="danger" onclick="delTaskCheckPwd(${i})">删除</button>
+    </div>
+    </div>`
+  })
+  document.getElementById('taskList').innerHTML=tHtml;
+
+  let rHtml='';
+  data.rewards.forEach((item,i)=>{
+    const icon = item.icon || '';
+    rHtml+=`<div class="item"><span class="item-icon">${icon}</span>${item.name} 消耗${item.point}分
+    <div>
+      <button class="success" onclick="exchange(${i})">兑换</button>
+      <button class="danger" onclick="delReward(${i})">删除</button>
+    </div>
+    </div>`
+  })
+  document.getElementById('rewardList').innerHTML=rHtml;
+
+  let logHtml='';
+  data.logs.slice().reverse().forEach(log=>{
+    logHtml += `<div class="log-item">${log.time}｜${log.text}</div>`
+  })
+  document.getElementById('logList').innerHTML=logHtml || '<div style="color:#999">暂无记录</div>';
+}
+
+function addTask(){
+  const iconSel = document.getElementById('taskIcon').value;
+  const name=document.getElementById('taskName').value.trim();
+  const p=Number(document.getElementById('taskPoint').value);
+  if(!name){alert('请填写任务名称');return;}
+  if(!p || p <=0){alert('积分必须大于0！');return;}
+  data.tasks.push({icon:iconSel,name,point:p});
+  save();
+  render();
+  document.getElementById('taskName').value='';
+  document.getElementById('taskPoint').value='';
+  document.getElementById('taskIcon').value='';
+}
+
+// 删除任务：密码校验入口
+function delTaskCheckPwd(i){
+  let inputPwd = prompt("请输入删除密码：");
+  if(inputPwd === PASSWORD){
+    data.tasks.splice(i,1);
+    save();
+    render();
+  }else{
+    alert("密码错误，无法删除！");
+  }
+}
+
+function getPoint(i){
+  const addP = data.tasks[i].point;
+  data.score = data.score + addP;
+  data.logs.push({
+    time:new Date().toLocaleString(),
+    text:`✅完成任务【${data.tasks[i].name}】，获得${addP}积分`
+  })
+  save();
+  render();
+  triggerScoreFlash(); // 触发积分闪烁
+}
+
+function addReward(){
+  const iconSel = document.getElementById('rewardIcon').value;
+  const name=document.getElementById('rewardName').value.trim();
+  const p=Number(document.getElementById('rewardPoint').value);
+  if(!name){alert('填写奖励名称');return;}
+  if(!p || p <=0){alert('积分必须大于0！');return;}
+  data.rewards.push({icon:iconSel,name,point:p});
+  save();
+  render();
+  document.getElementById('rewardName').value='';
+  document.getElementById('rewardPoint').value='';
+  document.getElementById('rewardIcon').value='';
+}
+function delReward(i){
+  data.rewards.splice(i,1);
+  save();
+  render();
+}
+function exchange(i){
+  const need=data.rewards[i].point;
+  if(data.score >= need){
+    data.score -= need;
+    data.logs.push({
+      time:new Date().toLocaleString(),
+      text:`🎁兑换奖励【${data.rewards[i].name}】，消耗${need}积分`
+    })
+    save();
+    render();
+    triggerScoreFlash(); // 兑换扣积分同样闪烁
+  }else {
+    alert('积分不足！');
+  }
+}
+
+// 重置全部数据：密码校验
+function clearAll(){
+  let inputPwd = prompt("⚠️确认清空全部数据，请输入密码：");
+  if(inputPwd === PASSWORD){
+    if(confirm('确定清空积分、任务、奖励、全部记录？此操作不可恢复！')){
+      data={score:0,tasks:[],rewards:[],logs:[]};
+      save();
+      render();
+    }
+  }else{
+    alert("密码错误，取消重置！");
+  }
+}
+render();
+</script>
+</body>
+</html>
